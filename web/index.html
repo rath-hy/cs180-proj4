@@ -118,24 +118,17 @@ Consecutive shots overlap by about 50%.</p>
 <div class="row"><figure class=""><img src="images/chessboard_photo.jpg" alt="Chessboard (for rectification)" loading="lazy"><figcaption>Chessboard (for rectification)</figcaption></figure><figure class=""><img src="images/double_door_photo.jpg" alt="Double door (for rectification)" loading="lazy"><figcaption>Double door (for rectification)</figcaption></figure></div></section>
 <section id="a2"><h2>A.2 &nbsp;Recovering Homographies</h2>
 <details class="code"><summary>Implementation: <code>build_homography_system</code>, <code>computeH</code></summary><pre><code class="language-python">def build_homography_system(im1_pts, im2_pts):
-    &quot;&quot;&quot;Build the linear system A h = b for the 8 unknowns of H.
-
-    im1_pts, im2_pts: (n, 2) arrays of (x, y) correspondences.
-    Returns A with shape (2n, 8) and b with shape (2n,), where
-    h = [h11, h12, h13, h21, h22, h23, h31, h32] and h33 = 1.
-    &quot;&quot;&quot;
+    &quot;&quot;&quot;Build A (2n x 8) and b (2n,) for the unknowns h = [h11, ..., h32], with h33 = 1.&quot;&quot;&quot;
     A, b = [], []
     for (x, y), (xp, yp) in zip(im1_pts, im2_pts):
-        # x&#x27; (h31 x + h32 y + 1) = h11 x + h12 y + h13
         A.append([x, y, 1, 0, 0, 0, -x * xp, -y * xp])
         b.append(xp)
-        # y&#x27; (h31 x + h32 y + 1) = h21 x + h22 y + h23
         A.append([0, 0, 0, x, y, 1, -x * yp, -y * yp])
         b.append(yp)
     return np.array(A, dtype=np.float64), np.array(b, dtype=np.float64)
 
 def computeH(im1_pts, im2_pts):
-    &quot;&quot;&quot;Return the 3x3 homography H (H[2, 2] == 1) mapping im1_pts -&gt; im2_pts via least squares.&quot;&quot;&quot;
+    &quot;&quot;&quot;Least-squares homography mapping im1_pts -&gt; im2_pts.&quot;&quot;&quot;
     assert len(im1_pts) == len(im2_pts) &gt;= 4, &#x27;need at least 4 correspondences&#x27;
     A, b = build_homography_system(im1_pts, im2_pts)
     h, *_ = np.linalg.lstsq(A, b, rcond=None)
@@ -268,33 +261,27 @@ came from in the source image.</li>
 </ol>
 
 <details class="code"><summary>Implementation: <code>warpImageNearestNeighbor</code>, <code>warpImageBilinear</code></summary><pre><code class="language-python">def compute_warp_bounds(im_shape, H):
-    &quot;&quot;&quot;Return integer (xmin, ymin, xmax, ymax) covering the image&#x27;s four corners mapped through H.&quot;&quot;&quot;
+    &quot;&quot;&quot;Bounding box (xmin, ymin, xmax, ymax) of the image&#x27;s corners mapped through H.&quot;&quot;&quot;
     h, w = im_shape[:2]
     corners = np.array([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]], dtype=np.float64)
     warped = apply_homography(H, corners)
     xmin, ymin = np.floor(warped.min(axis=0)).astype(int)
-    xmax, ymax = np.ceil(warped.max(axis=0)).astype(int) + 1  # +1 so the last pixel is included
+    xmax, ymax = np.ceil(warped.max(axis=0)).astype(int) + 1
     return int(xmin), int(ymin), int(xmax), int(ymax)
 
 
 def _source_coords(im, H, bounds):
-    &quot;&quot;&quot;Inverse-map every output pixel: returns source (sx, sy), each of shape (out_h, out_w).&quot;&quot;&quot;
+    &quot;&quot;&quot;Map every output pixel back through H^-1; returns source (sx, sy) grids.&quot;&quot;&quot;
     if bounds is None:
         bounds = compute_warp_bounds(im.shape, H)
     xmin, ymin, xmax, ymax = bounds
-    # output pixel (r, c) is destination point (xmin + c, ymin + r)
     xs, ys = np.meshgrid(np.arange(xmin, xmax), np.arange(ymin, ymax))
     src = apply_homography(np.linalg.inv(H), np.stack([xs.ravel(), ys.ravel()], axis=1))
     return src[:, 0].reshape(xs.shape), src[:, 1].reshape(xs.shape)
 
 
 def warpImageNearestNeighbor(im, H, bounds=None):
-    &quot;&quot;&quot;Inverse-warp `im` by H with nearest-neighbor sampling.
-
-    bounds: output region in the destination frame (see convention above);
-            if None, use compute_warp_bounds(im.shape, H).
-    Returns (imwarped, alpha).
-    &quot;&quot;&quot;
+    &quot;&quot;&quot;Inverse warp with nearest-neighbor sampling. Returns (imwarped, alpha).&quot;&quot;&quot;
     sx, sy = _source_coords(im, H, bounds)
     h, w = im.shape[:2]
     c, r = np.round(sx).astype(int), np.round(sy).astype(int)
@@ -305,20 +292,14 @@ def warpImageNearestNeighbor(im, H, bounds=None):
 
 
 def warpImageBilinear(im, H, bounds=None):
-    &quot;&quot;&quot;Inverse-warp `im` by H with bilinear interpolation (weighted average of 4 neighbors).
-
-    Same interface as warpImageNearestNeighbor. Returns (imwarped, alpha).
-    &quot;&quot;&quot;
+    &quot;&quot;&quot;Inverse warp with bilinear interpolation. Returns (imwarped, alpha).&quot;&quot;&quot;
     sx, sy = _source_coords(im, H, bounds)
     h, w = im.shape[:2]
-    # all 4 neighbors must exist, so stay within the span of pixel centers
     valid = (sx &gt;= 0) &amp; (sx &lt;= w - 1) &amp; (sy &gt;= 0) &amp; (sy &lt;= h - 1)
     x, y = sx[valid], sy[valid]
-    # clamp so x0 + 1 / y0 + 1 stay in bounds; at x == w - 1 this gives a == 1, the same value
-    x0 = np.minimum(np.floor(x).astype(int), w - 2)
+    x0 = np.minimum(np.floor(x).astype(int), w - 2)  # clamp so x0 + 1 stays in bounds
     y0 = np.minimum(np.floor(y).astype(int), h - 2)
-    # weights as (N,) for grayscale or (N, 1) for color, so they broadcast over channels
-    shape = (-1,) + (1,) * (im.ndim - 2)
+    shape = (-1,) + (1,) * (im.ndim - 2)  # broadcast weights over channels
     a, b = (x - x0).reshape(shape), (y - y0).reshape(shape)
     out = np.zeros(sx.shape + im.shape[2:])
     out[valid] = ((1 - a) * (1 - b) * im[y0, x0] + a * (1 - b) * im[y0, x0 + 1]
@@ -362,36 +343,26 @@ average of all images that cover it.</li>
 </ul>
 
 <details class="code"><summary>Implementation: <code>make_alpha_mask</code>, <code>build_mosaic</code></summary><pre><code class="language-python">def make_alpha_mask(h, w):
-    &quot;&quot;&quot;Feathering weights for an h x w image: 1 at the center, falling linearly to 0 at the edges.&quot;&quot;&quot;
+    &quot;&quot;&quot;Feathering weights: 1 at the center, falling linearly to ~0 at the edges.&quot;&quot;&quot;
     ramp_y = 1 - np.abs(np.linspace(-1, 1, h))
     ramp_x = 1 - np.abs(np.linspace(-1, 1, w))
-    # each pixel is limited by its distance to the nearest edge; the epsilon keeps border pixels
-    # from having zero total weight when only one image covers them
     return np.minimum.outer(ramp_y, ramp_x) + 1e-6
 
 
 def build_mosaic(images, Hs, warp_fn=None, two_band=False, sigma=5):
-    &quot;&quot;&quot;Warp every image into a common frame and blend with weighted averaging (feathering).
-
-    images: list of (h, w, 3) images.
-    Hs: list of 3x3 homographies; Hs[i] maps image i into the reference frame.
-    warp_fn: warpImageBilinear or warpImageNearestNeighbor.
-    two_band: if True, feather only the low frequencies (blur with `sigma`) and take high-frequency
-              detail from the image with the largest weight at each pixel, to reduce ghosting.
-    Returns the mosaic, shape (H, W, 3).
-    &quot;&quot;&quot;
+    &quot;&quot;&quot;Warp every image into the reference frame (Hs[i]: image i -&gt; reference) and feather-blend.&quot;&quot;&quot;
     warp_fn = warp_fn or warpImageBilinear
-    # 1. shared canvas: union of every warped image&#x27;s bounds
+    # shared canvas: union of every warped image&#x27;s bounds
     bs = np.array([compute_warp_bounds(im.shape, H) for im, H in zip(images, Hs)])
     bounds = (int(bs[:, 0].min()), int(bs[:, 1].min()), int(bs[:, 2].max()), int(bs[:, 3].max()))
 
-    # 2. warp each image with its feather weights stacked as a 4th channel
+    # warp each image with its feathering weights as a 4th channel
     rgbs, wgts, alphas = [], [], []
     for im, H in zip(images, Hs):
         stacked = np.dstack([im, make_alpha_mask(*im.shape[:2])])
         warped, alpha = warp_fn(stacked, H, bounds)
         rgbs.append(warped[..., :3])
-        wgts.append(warped[..., 3:])  # keep the last axis so it broadcasts over RGB
+        wgts.append(warped[..., 3:])
         alphas.append(alpha[..., None])
 
     def feather(layers):
@@ -401,22 +372,21 @@ def build_mosaic(images, Hs, warp_fn=None, two_band=False, sigma=5):
     if not two_band:
         return feather(rgbs)
 
-    # 3. two-band: blur only inside each image (normalized by the blurred alpha) so the black
-    #    area outside it doesn&#x27;t darken the low band near the edges
+    # two-band: feather the low frequencies, take high frequencies from the strongest image
     blur = lambda x: gaussian_filter(x, sigma=(sigma, sigma, 0))
     lows = [blur(rgb * a) / np.maximum(blur(a), 1e-8) * a for rgb, a in zip(rgbs, alphas)]
     highs = [rgb - low for rgb, low in zip(rgbs, lows)]
-    k = np.stack(wgts).argmax(axis=0)  # index of the strongest image at each pixel
+    k = np.stack(wgts).argmax(axis=0)
     high = np.take_along_axis(np.stack(highs), k[None], axis=0)[0]
     return np.clip(feather(lows) + high, 0, 1)</code></pre></details>
 <details class="code"><summary>Implementation: chaining homographies to the reference image</summary><pre><code class="language-python">def homographies_to_ref(name):
-    &quot;&quot;&quot;Hs[i]: image i -&gt; reference, built from the adjacent-pair homographies in pair_H.&quot;&quot;&quot;
+    &quot;&quot;&quot;Chain the adjacent-pair homographies so Hs[i] maps image i into the reference frame.&quot;&quot;&quot;
     n, ref = len(mosaic_images[name]), MOSAICS[name][&#x27;ref&#x27;]
     Hs = [None] * n
     Hs[ref] = np.eye(3)
-    for i in range(ref - 1, -1, -1):  # left of ref: i -&gt; i+1 -&gt; ... -&gt; ref
+    for i in range(ref - 1, -1, -1):
         Hs[i] = Hs[i + 1] @ pair_H[(name, i, i + 1)]
-    for i in range(ref + 1, n):       # right of ref: i -&gt; i-1 -&gt; ... -&gt; ref
+    for i in range(ref + 1, n):
         Hs[i] = Hs[i - 1] @ np.linalg.inv(pair_H[(name, i - 1, i)])
     return [H / H[2, 2] for H in Hs]</code></pre></details>
 <h3>Wall</h3><figure class="wide"><img src="images/wall_sources.jpg" alt="Source images" loading="lazy"><figcaption>Source images</figcaption></figure><figure class="wide mosaic"><img src="images/wall_mosaic.jpg" alt="Mosaic" loading="lazy"><figcaption>Mosaic</figcaption></figure><p><strong>Mosaic 1 (wall):</strong> The doors, display board and floor tiles line up across well, but the reflections on the glossy floor
