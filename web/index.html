@@ -170,7 +170,7 @@ def computeH(im1_pts, im2_pts):
 \begin{bmatrix} h_{11} &amp; h_{12} &amp; h_{13} \\ h_{21} &amp; h_{22} &amp; h_{23} \\ h_{31} &amp; h_{32} &amp; 1 \end{bmatrix}
 \begin{bmatrix} x \\ y \\ 1 \end{bmatrix}
 $$</p>
-<p>$h_{33} = 1$, which leaves 8 unknowns.</p>
+<p>Since $H$ is only defined up to scale, I fix $h_{33} = 1$, which leaves 8 unknowns.</p>
 <p>Multiplying out the matrix gives</p>
 <p>$$
 w x' = h_{11} x + h_{12} y + h_{13}, \qquad
@@ -196,13 +196,13 @@ $$
 $$
 h_{21} x + h_{22} y + h_{23} - h_{31}\, x y' - h_{32}\, y y' = y'
 $$</p>
-<p>Writing this in matrix form,</p>
+<p>Writing this in matrix form, each correspondence $(x, y) \leftrightarrow (x', y')$ contributes two rows:</p>
 <p>$$
 \begin{bmatrix} x &amp; y &amp; 1 &amp; 0 &amp; 0 &amp; 0 &amp; -x x' &amp; -y x' \\ 0 &amp; 0 &amp; 0 &amp; x &amp; y &amp; 1 &amp; -x y' &amp; -y y' \end{bmatrix}
 \begin{bmatrix} h_{11} \\ h_{12} \\ h_{13} \\ h_{21} \\ h_{22} \\ h_{23} \\ h_{31} \\ h_{32} \end{bmatrix}
 = \begin{bmatrix} x' \\ y' \end{bmatrix}
 $$</p>
-<p>Four points give 8 equations, which determine $H$ exactly, but real correspondences
+<p>Stacking these two rows for all $n$ correspondences gives a $2n \times 8$ system $A\mathbf{h} = \mathbf{b}$. Four points give 8 equations, which determine $H$ exactly, but real correspondences
 are noisy, so I use 13–16 well-spread points per pair. That makes the system overdetermined, so I solve it
 with least squares (<code>np.linalg.lstsq</code>):</p>
 <p>$$
