@@ -277,6 +277,11 @@ page = f"""<!doctype html>
   footer {{ background: var(--walnut); color: var(--stone); text-align: center; font-style: italic; font-size: 16px; }}
   footer .tiles {{ transform: scaleY(-1); }}
   footer p {{ margin: 0; padding: 22px 16px 28px; }}
+  @media print {{
+    h2, h3, details.code {{ break-after: avoid; }}
+    figure, pre.matrix, table, #ack p {{ break-inside: avoid; }}
+    figure img {{ box-shadow: none; }}
+  }}
 </style>
 </head>
 <body>
