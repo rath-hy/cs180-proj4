@@ -28,6 +28,14 @@ NAME = 'Puthyrath Hy'
 MAX_SIDE = 1800
 
 nb = {c['id']: ''.join(c['source']) for c in json.loads((ROOT / 'main.ipynb').read_text())['cells']}
+nbB_cells = {c['id']: c for c in json.loads((ROOT / 'partB.ipynb').read_text())['cells']}
+nbB = {k: ''.join(c['source']) for k, c in nbB_cells.items()}
+
+
+def stream_lines(cell_id):
+    """Printed stdout lines of a Part B cell."""
+    out = ''.join(''.join(o['text']) for o in nbB_cells[cell_id].get('outputs', []) if o.get('output_type') == 'stream')
+    return [l for l in out.splitlines() if l.strip()]
 
 
 # ---------- markdown / code ----------
@@ -55,8 +63,8 @@ def split_md(text, *headers):
     return parts + [rest]
 
 
-def code(cell_id, title):
-    src = nb[cell_id].strip()
+def code(cell_id, title, src_nb=None):
+    src = (src_nb or nb)[cell_id].strip()
     return (f'<details class="code"><summary>{title}</summary>'
             f'<pre><code class="language-python">{html.escape(src)}</code></pre></details>')
 
@@ -123,7 +131,7 @@ a4_proc, a4_results = split_md(nb['cell-36'], '**Mosaic 1')
 a4_each = re.split(r'(?=\*\*Mosaic \d)', a4_results.strip())
 a4_each = [p for p in a4_each if p.strip()]
 
-sec = []
+sec = ['<div class="part" id="partA"><p class="eyebrow">Part A</p><h2>Image Warping and Mosaicing</h2></div>']
 
 # A.1
 sec.append('<section id="a1"><h2>A.1 &nbsp;Shooting the Pictures</h2>' + md(nb['cell-08']))
@@ -174,6 +182,72 @@ for (key, title), text in zip(MOSAICS, a4_each):
                + md(text))
 sec.append('</section>')
 
+# ---------- Part B ----------
+
+PAIRS = [(k, t, i) for k, t in MOSAICS for i in range(2)]
+sec.append('<div class="part" id="partB"><p class="eyebrow">Part B</p><h2>Feature Matching for Autostitching</h2></div>')
+
+# B.1
+sec.append('<section id="b1"><h2>B.1 &nbsp;Harris Corner Detection</h2>' + md(nbB['R_x3Dgpv0JEN']))
+sec.append(code('612fff34', 'Implementation: <code>detect_corners</code>', nbB))
+sec.append('<h3>Adaptive Non-Maximal Suppression</h3>' + md(nbB['Ib77FTH90RC_']))
+sec.append(code('b3c0423e', 'Implementation: <code>anms</code>', nbB))
+sec.append(md(nbB['ySm0rXaR1oBI']))
+for key, title in MOSAICS:
+    sec.append(fig(export(OUT / f'b_{key}_corners.jpg', f'b_{key}_corners.jpg'),
+                   f'{title} (middle image): all Harris corners vs. after ANMS', 'wide'))
+sec.append(md(nbB['760bac09']))
+for key, title in MOSAICS:
+    sec.append(fig(export(OUT / f'b_{key}_top_vs_anms.jpg', f'b_{key}_top_vs_anms.jpg'),
+                   f'{title}: 500 strongest corners vs. 500 corners from ANMS', 'wide'))
+sec.append('</section>')
+
+# B.2
+sec.append('<section id="b2"><h2>B.2 &nbsp;Feature Descriptor Extraction</h2>' + md(nbB['ErWsuoKoOqJ6']))
+sec.append(code('a90725c2', 'Implementation: <code>extract_descriptors</code>', nbB))
+sec.append(fig(export(OUT / 'b_descriptors.jpg', 'b_descriptors.jpg'),
+               'Sampled features: location, raw 40x40 window, and normalized 8x8 descriptor', 'wide'))
+sec.append('</section>')
+
+# B.3
+sec.append('<section id="b3"><h2>B.3 &nbsp;Feature Matching</h2>' + md(nbB['4KLUwol5smq-']))
+sec.append(code('90008eb6', 'Implementation: <code>match_features</code>', nbB))
+sec.append(md(nbB['ps4c0L-rvFlr']))
+for key, title, i in PAIRS:
+    sec.append(fig(export(OUT / f'b_{key}_{i}_{i + 1}_matches.jpg', f'b_{key}_{i}_{i + 1}_matches.jpg'),
+                   f'{title}: images {i} and {i + 1}, matches passing the ratio test', 'wide'))
+sec.append(md(nbB['8bf8ef93']))
+sec.append(fig(export(OUT / 'b_ratio_hist.jpg', 'b_ratio_hist.jpg', 1000),
+               'Distribution of the 1-NN / 2-NN ratio over all features', 'narrow'))
+sec.append('</section>')
+
+# B.4
+sec.append('<section id="b4"><h2>B.4 &nbsp;RANSAC and Automatic Mosaics</h2>' + md(nbB['RJ6sJk6n0MES']))
+sec.append(code('9cedc239', 'Implementation: <code>ransac_homography</code>', nbB))
+for key, title, i in PAIRS:
+    sec.append(fig(export(OUT / f'b_{key}_{i}_{i + 1}_ransac.jpg', f'b_{key}_{i}_{i + 1}_ransac.jpg'),
+                   f'{title}: images {i} and {i + 1}, RANSAC inliers (green) and outliers (red)', 'wide'))
+sec.append('<h3>Manual vs. automatic</h3>' + md(nbB['qWeYTb9B5Ifm']))
+rows = [re.match(r'(\w+) (\d->\d): error on manual points: manual H ([\d.]+) px, automatic H ([\d.]+) px', l)
+        for l in stream_lines('f46557dd')]
+sec.append('<table><tr><th>Pair</th><th>Manual H</th><th>Automatic H</th></tr>' + ''.join(
+    f'<tr><td>{m[1]} {m[2].replace("->", " &rarr; ")}</td><td>{m[3]} px</td><td>{m[4]} px</td></tr>'
+    for m in rows if m) + '</table><p class="note">Mean reprojection error on the Part A correspondence points.</p>')
+for key, title in MOSAICS:
+    sec.append(f'<h3>{title}</h3>' + fig(export(OUT / f'b_{key}_manual_vs_auto.jpg', f'b_{key}_manual_vs_auto.jpg'),
+                                          'Manual (left) vs. automatic (right)', 'wide mosaic'))
+sec.append('<h3>Experiment: sloppier clicks</h3>' + md(nbB['0e9a3341']))
+sec.append(fig(export(OUT / 'b_click_noise_curve.jpg', 'b_click_noise_curve.jpg', 1000),
+               'Error vs. simulated click noise', 'narrow'))
+for key, title in MOSAICS:
+    sec.append(fig(export(OUT / f'b_{key}_sloppy_vs_auto.jpg', f'b_{key}_sloppy_vs_auto.jpg'),
+                   f'{title}: careful clicks, simulated sloppy clicks, automatic', 'wide mosaic'))
+sec.append(md(nbB['c9b900ef']))
+for key, title in MOSAICS:
+    sec.append(fig(export(OUT / f'b_{key}_sloppy_zoom.jpg', f'b_{key}_sloppy_zoom.jpg'),
+                   f'{title}: zoom on the left seam', 'wide'))
+sec.append('</section>')
+
 PROJECT_NAV = ('<p class="projects"><a href="cs180.html">Project 0</a><a href="cs180-proj1.html">Project 1</a>'
                '<a href="cs180-proj2.html">Project 2</a><a href="cs180-proj3.html">Project 3</a><b>Project 4</b></p>'
                if args.site else '')
@@ -188,7 +262,7 @@ page = f"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CS180 Project 4A: Image Warping and Mosaicing</title>
+<title>CS180 Project 4: Image Warping, Mosaicing &amp; Autostitching</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
@@ -221,13 +295,21 @@ page = f"""<!doctype html>
   .projects b {{ color: var(--walnut); border-bottom: 1px solid var(--walnut); }}
   .eyebrow {{ margin: 0; font: 600 14px/1 'Cormorant Garamond', serif; letter-spacing: 0.32em;
              text-transform: uppercase; color: var(--terracotta); }}
-  header h1 {{ margin: 14px 0 6px; font: 700 clamp(34px, 6vw, 56px)/1.05 'Cormorant Garamond', serif; color: var(--walnut); }}
+  header h1 {{ margin: 14px 0 6px; font: 700 clamp(30px, 4.6vw, 50px)/1.05 'Cormorant Garamond', serif; color: var(--walnut); }}
   .byline {{ margin: 0; font-style: italic; color: var(--muted); }}
   nav {{ margin-top: 26px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }}
   nav a {{ padding: 10px 16px 6px; border-radius: 22px 22px 3px 3px; background: var(--walnut);
           border: 1px solid var(--brass); color: var(--stucco); text-decoration: none;
           font: 600 15px/1 'Cormorant Garamond', serif; letter-spacing: 0.04em; transition: background 0.2s; }}
   nav a:hover {{ background: var(--terracotta); }}
+  nav.partnav {{ align-items: center; margin-top: 14px; }}
+  nav.partnav span {{ font: 600 13px/1 'Cormorant Garamond', serif; letter-spacing: 0.24em; text-transform: uppercase;
+                     color: var(--terracotta); min-width: 64px; }}
+  .part {{ margin-top: 72px; padding: 28px 16px 8px; text-align: center; border-top: 3px double var(--terracotta); }}
+  .part h2 {{ font-size: clamp(30px, 5vw, 42px); margin-top: 10px; justify-content: center; }}
+  .part h2::before, .part h2::after {{ display: none; }}
+  figure.narrow {{ max-width: 680px; margin-left: auto; margin-right: auto; }}
+  p.note {{ text-align: center; color: var(--muted); font-style: italic; font-size: 16px; margin-top: -6px; }}
 
   /* clay roof tiles */
   .tiles {{ height: 24px; background:
@@ -288,10 +370,11 @@ page = f"""<!doctype html>
 <header>
   <div class="arch">
     {PROJECT_NAV}
-    <p class="eyebrow">CS180 &middot; Project 4A</p>
-    <h1>Image Warping &amp; Mosaicing</h1>
+    <p class="eyebrow">CS180 &middot; Project 4</p>
+    <h1>Image Warping, Mosaicing &amp; Autostitching</h1>
     <p class="byline">{html.escape(NAME)}</p>
-    <nav><a href="#a1">Pictures</a><a href="#a2">Homographies</a><a href="#a3">Warping</a><a href="#a4">Mosaics</a></nav>
+    <nav class="partnav"><span>Part A</span><a href="#a1">Pictures</a><a href="#a2">Homographies</a><a href="#a3">Warping</a><a href="#a4">Mosaics</a></nav>
+    <nav class="partnav"><span>Part B</span><a href="#b1">Corners</a><a href="#b2">Descriptors</a><a href="#b3">Matching</a><a href="#b4">RANSAC</a></nav>
   </div>
 </header>
 <div class="tiles"></div>
